@@ -21,7 +21,9 @@ chrome-headless-shell/
 
 # Generated outputs
 *.pdf
+*.epub
 output.pdf
+
 
 # Temp files
 /tmp/

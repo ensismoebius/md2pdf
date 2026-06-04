@@ -45,14 +45,16 @@ rl.on('line', (line) => {
     return;
   }
   try {
+    // 'html' for PDF (WeasyPrint handles complex CSS); 'mathml' for EPUB (native reader support)
+    const output = (record.mode === 'mathml') ? 'mathml' : 'html';
     const svg = katex.renderToString(record.math, {
       displayMode: !!record.display,
-      output: 'html',        // produces span-based HTML compatible with weasyprint
+      output: output,
       throwOnError: false,
       strict: 'ignore',
       trust: false,
     });
-    // Single line — replace actual newlines inside svg
+    // Single line — replace actual newlines inside output
     process.stdout.write(svg.replace(/\n/g, ' ') + '\n');
   } catch (e) {
     // Fallback: emit the raw LaTeX in a styled <code>

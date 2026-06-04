@@ -274,9 +274,10 @@ hr {
 
 # ── Math rendering via KaTeX node helper ────────────────────────────────────
 
-def render_math_blocks(content: str) -> str:
+def render_math_blocks(content: str, math_output: str = 'html') -> str:
     """
-    Replace all LaTeX math in markdown with pre-rendered KaTeX HTML.
+    Replace all LaTeX math in markdown with pre-rendered KaTeX output.
+    math_output: 'html' (default, for PDF) or 'mathml' (for EPUB readers).
     Handles:
       $$...$$  (display, possibly multiline)
       $...$    (inline, single line only, not inside code)
@@ -304,7 +305,7 @@ def render_math_blocks(content: str) -> str:
     def stash_display(m: re.Match) -> str:
         src = m.group(1).strip()
         idx = len(math_items)
-        math_items.append({"math": src, "display": True})
+        math_items.append({"math": src, "display": True, "mode": math_output})
         ph = f"\x01MATH{idx}\x01"
         placeholders.append(ph)
         return ph
@@ -314,7 +315,7 @@ def render_math_blocks(content: str) -> str:
         if not src:
             return m.group(0)
         idx = len(math_items)
-        math_items.append({"math": src, "display": False})
+        math_items.append({"math": src, "display": False, "mode": math_output})
         ph = f"\x01MATH{idx}\x01"
         placeholders.append(ph)
         return ph
@@ -668,8 +669,9 @@ def build_html(sections: list[tuple[str, str, str]]) -> str:
     katex_style = f"<style>{KATEX_CSS}</style>" if KATEX_CSS else ""
     extra_css = """
 <style>
-.math-display { display: block; text-align: center; margin: 1em 0; overflow-x: auto; }
-.katex-display { overflow-x: auto; overflow-y: hidden; }
+.math-display { display: block; text-align: center; margin: 1em 0; overflow-x: auto; overflow-y: visible; padding: 0.25em 0; }
+.katex-display { overflow-x: auto; overflow-y: visible; padding: 0.25em 0; }
+.katex { line-height: 1.2; }
 .math-fallback { background: #fff3cd; padding: 2px 4px; border-radius: 3px; font-style: italic; }
 </style>"""
     parts = ["<!DOCTYPE html>", "<html lang='en'>", "<head>",
@@ -748,7 +750,7 @@ def convert(input_path: Path, output_path: Path,
             # Strip YAML front matter
             content = re.sub(r'^---\s*\n.*?\n---\s*\n', '', content, count=1, flags=re.DOTALL)
             # Render math (KaTeX) — must be before markdown conversion
-            content = render_math_blocks(content)
+            content = render_math_blocks(content, math_output='mathml' if output_format == 'epub' else 'html')
             # Render mermaid blocks
             content = render_mermaid_blocks(content, doc.parent, tmp_dir)
             # Rewrite relative image paths to absolute
@@ -920,12 +922,12 @@ def write_epub(sections: list[tuple[str, str, str]], output_epub: Path,
     book.set_language("en")
     book.add_author("md2pdf")
 
-    # CSS for EPUB
+    # CSS for EPUB (math is MathML — no KaTeX HTML CSS needed)
     epub_css = f"""
 {GITHUB_CSS}
-{KATEX_CSS if KATEX_CSS else ""}
 .math-display {{ display: block; text-align: center; margin: 1em 0; overflow-x: auto; }}
-.katex-display {{ overflow-x: auto; overflow-y: hidden; }}
+math {{ display: inline; }}
+math[display="block"] {{ display: block; margin: 0.75em auto; text-align: center; overflow-x: auto; }}
 .math-fallback {{ background: #fff3cd; padding: 2px 4px; border-radius: 3px; font-style: italic; }}
 .doc-section {{ margin-bottom: 2em; }}
 .section-sep {{ margin: 2em 0; border-top: 1px solid #d0d7de; }}
