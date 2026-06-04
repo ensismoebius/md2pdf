@@ -12,7 +12,7 @@
 
 - **Recursive link following** — starts from `home.md` or `index.md` and follows every relative `.md` link (BFS order), assembling all pages into one document
 - **Mermaid diagrams** — `flowchart`, `sequenceDiagram`, `classDiagram`, `gitGraph`, and more rendered as crisp PNGs
-- **LaTeX math** — `$inline$` and `$$display$$` math rendered server-side via [KaTeX](https://katex.org) (no browser needed)
+- **LaTeX math** — `$inline$` and `$$display$$` math rendered server-side via [KaTeX](https://katex.org); KaTeX HTML for PDF, native MathML for EPUB
 - **GitHub-style CSS** — Inter/system font stack, syntax-highlighted code blocks (Pygments), tables, task lists, blockquotes
 - **Working internal links** — cross-document `[text](other.md#heading)` links become clickable bookmarks in both PDF and EPUB
 - **Page options** — portrait/landscape, custom margins (PDF)
@@ -158,7 +158,7 @@ input directory
       ▼
  BFS link traversal             ← follows [text](page.md) and [[Page]] links
       │
-      ├─ render_math_blocks()    ← KaTeX: $...$ and $$...$$ → HTML spans
+      ├─ render_math_blocks()    ← KaTeX: $...$ and $$...$$ → HTML (PDF) or MathML (EPUB)
       ├─ render_mermaid_blocks() ← mmdc: ```mermaid → PNG images
       ├─ rewrite_image_paths()   ← relative imgs → absolute file:// URIs
       ├─ md_to_html_fragment()   ← python-markdown + pymdownx extensions
@@ -167,14 +167,15 @@ input directory
 
       │
       ├──── PDF path ─────────────────────────────────────────────────────
-      │      build_html()         ← single HTML doc + GitHub CSS + KaTeX CSS
-      │      weasyprint → PDF     ← A4, page numbers, configurable margins
+      │      build_html()          ← single HTML doc + GitHub CSS + KaTeX CSS
+      │      weasyprint → PDF      ← A4, page numbers, configurable margins
       │
       └──── EPUB path ────────────────────────────────────────────────────
-             per-chapter XHTML    ← one file per .md document
+             per-chapter XHTML     ← one file per .md document
              _rewrite_epub_links() ← #anchor → chap_NNN.xhtml[#id]
-             _embed_epub_images() ← local PNGs bundled into EPUB container
-             ebooklib → EPUB      ← NCX + Nav TOC, CSS embedded
+             _embed_epub_images()  ← local PNGs bundled into EPUB container
+             math → MathML         ← native rendering, no CSS layout tricks
+             ebooklib → EPUB       ← NCX + Nav TOC, CSS embedded
 ```
 
 ---
@@ -220,6 +221,9 @@ $$
 $$
 ```
 
+**PDF** — KaTeX renders to HTML spans styled with the bundled `katex.min.css`.  
+**EPUB** — KaTeX renders to MathML, which EPUB readers display natively without CSS dependencies (fractions, integrals, and tall expressions render at full height). Kindle does not support MathML; equations will show as fallback text on that platform.
+
 ---
 
 ## Mermaid diagrams
@@ -242,7 +246,7 @@ flowchart TD
 ```
 md2pdf/
 ├── md2pdf.py          # main script (cross-platform)
-├── katex_render.js    # Node helper — batch-renders LaTeX → KaTeX HTML
+├── katex_render.js    # Node helper — batch-renders LaTeX → KaTeX HTML (PDF) or MathML (EPUB)
 ├── install.sh         # installer for Linux / macOS
 ├── install.ps1        # installer for Windows (PowerShell)
 ├── requirements.txt   # Python dependencies
@@ -266,6 +270,8 @@ md2pdf/
 **EPUB: links do not navigate** — only relative `.md` links are rewritten; external URLs and bare fragment anchors without a file part are left as-is.
 
 **Math shows as raw `$...$`** — ensure `katex_render.js` is present next to `md2pdf.py` and `node` is on your PATH.
+
+**EPUB: math shows as fallback text on Kindle** — Kindle does not support MathML. Use PDF for documents with heavy math, or export images of equations separately.
 
 **Fonts look wrong in PDF** — weasyprint uses system fonts. Install the `fonts-inter` package (Linux) or any sans-serif system font.
 
