@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Chromium headless (downloaded at install time, ~113 MB)
+# Exclude from repo — users run install.sh to get it
+~/.cache/puppeteer is the default location
+chrome-headless-shell/
+
+# Generated outputs
+*.pdf
+output.pdf
+
+# Temp files
+/tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Windows temp
+*.tmp
+~$*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

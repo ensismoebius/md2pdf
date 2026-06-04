@@ -1,0 +1,20 @@
+{
+  "name": "md2pdf",
+  "version": "1.0.0",
+  "description": "Convert interlinked Markdown files to a GitHub-styled PDF with Mermaid diagrams and LaTeX math",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/md2pdf"
+  },
+  "keywords": ["markdown", "pdf", "mermaid", "latex", "katex", "documentation"],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@mermaid-js/mermaid-cli": "^11.15.0"
+  },
+  "allowScripts": {
+    "puppeteer@24.43.1": true
+  }
+}
