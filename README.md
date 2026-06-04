@@ -36,7 +36,7 @@
 ### Linux / macOS
 
 ```bash
-git clone https://github.com/your-username/md2pdf.git
+git clone https://github.com/ensismoebius/md2pdf.git
 cd md2pdf
 bash install.sh
 ```
@@ -52,7 +52,7 @@ bash install.sh --check
 Open **PowerShell** (no admin required) and run:
 
 ```powershell
-git clone https://github.com/your-username/md2pdf.git
+git clone https://github.com/ensismoebius/md2pdf.git
 cd md2pdf
 .\install.ps1
 ```
