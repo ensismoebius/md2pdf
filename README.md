@@ -1,5 +1,8 @@
 # md2pdf
 
+<div align="center">
+  <img src="logo.png" width="400" alt="Obvious image of a markdown pointing to pdf"/>
+</div>
 > Convert interlinked Markdown files to a beautiful, GitHub-styled PDF or EPUB — with Mermaid diagrams, LaTeX math, working internal links, and syntax-highlighted code.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
