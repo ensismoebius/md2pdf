@@ -56,6 +56,17 @@ try { & $python -m pip --version | Out-Null } catch {
 }
 
 $packages = @('weasyprint', 'markdown', 'pymdown-extensions', 'pygments')
+$PythonInstallMode = 'system'
+
+function Install-PythonPackages {
+    param(
+        [Parameter(Mandatory = $true)][string]$PythonCmd
+    )
+
+    & $PythonCmd -m pip install --quiet @packages
+    return ($LASTEXITCODE -eq 0)
+}
+
 if ($Check) {
     foreach ($pkg in $packages) {
         $import = $pkg -replace 'pymdown-extensions', 'pymdownx'
@@ -65,12 +76,76 @@ if ($Check) {
     }
 } else {
     Write-Info "Installing Python packages..."
-    & $python -m pip install --quiet weasyprint markdown pymdown-extensions pygments
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "pip install failed. Try running PowerShell as Administrator or use a virtual environment."
-        exit 1
+    if (Install-PythonPackages -PythonCmd $python) {
+        Write-OK "Python packages installed"
+    } else {
+        Write-Warn "Global pip install failed."
+        Write-Host ""
+        Write-Host "  Python package install fallback"
+        Write-Host "  1) Create new virtual environment (.venv)"
+        Write-Host "  2) Use existing virtual environment"
+        Write-Host "  3) Abort"
+
+        while ($true) {
+            $choice = Read-Host "Choose [1/2/3]"
+            switch ($choice) {
+                '1' {
+                    $defaultVenv = Join-Path $SCRIPT_DIR '.venv'
+                    $venvPath = Read-Host "Venv path [$defaultVenv]"
+                    if ([string]::IsNullOrWhiteSpace($venvPath)) { $venvPath = $defaultVenv }
+
+                    Write-Info "Creating virtual environment at: $venvPath"
+                    & $python -m venv $venvPath
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Err "Failed to create virtual environment."
+                        continue
+                    }
+
+                    $venvPython = Join-Path $venvPath 'Scripts\python.exe'
+                    if (-not (Test-Path $venvPython)) {
+                        Write-Err "Invalid virtual environment. Missing: $venvPython"
+                        continue
+                    }
+
+                    if (Install-PythonPackages -PythonCmd $venvPython) {
+                        Write-OK "Python packages installed in virtual environment"
+                        $PythonInstallMode = "venv:$venvPath"
+                        break
+                    } else {
+                        Write-Err "Install failed in created virtual environment."
+                    }
+                }
+                '2' {
+                    $venvPath = Read-Host "Path to existing virtual environment"
+                    if ([string]::IsNullOrWhiteSpace($venvPath)) {
+                        Write-Warn "No path provided."
+                        continue
+                    }
+
+                    $venvPython = Join-Path $venvPath 'Scripts\python.exe'
+                    if (-not (Test-Path $venvPython)) {
+                        Write-Err "Not a valid virtual environment: $venvPath"
+                        continue
+                    }
+
+                    if (Install-PythonPackages -PythonCmd $venvPython) {
+                        Write-OK "Python packages installed in existing virtual environment"
+                        $PythonInstallMode = "venv:$venvPath"
+                        break
+                    } else {
+                        Write-Err "Install failed in existing virtual environment."
+                    }
+                }
+                '3' {
+                    Write-Err "Aborted by user."
+                    exit 1
+                }
+                default {
+                    Write-Warn "Invalid choice. Enter 1, 2, or 3."
+                }
+            }
+        }
     }
-    Write-OK "Python packages installed"
 }
 
 # ── 3. Node.js ─────────────────────────────────────────────────────────────────
@@ -163,6 +238,13 @@ if (-not $Check) {
 Write-Host ""
 Write-Host "  Installation complete." -ForegroundColor Green
 Write-Host ""
+if ($PythonInstallMode -like 'venv:*') {
+    $venvPath = $PythonInstallMode.Substring(5)
+    Write-Host "  Python packages installed in virtual environment: $venvPath"
+    Write-Host "  Activate before running md2pdf:"
+    Write-Host "    & '$venvPath\Scripts\Activate.ps1'"
+    Write-Host ""
+}
 Write-Host "  Usage:"
 Write-Host "    python $SCRIPT_DIR\md2pdf.py <docs-dir\>             # portrait, default margins"
 Write-Host "    python $SCRIPT_DIR\md2pdf.py <docs-dir\> out.pdf     # explicit output"

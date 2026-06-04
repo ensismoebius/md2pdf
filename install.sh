@@ -41,6 +41,20 @@ if ! command -v pip3 &>/dev/null && ! python3 -m pip --version &>/dev/null 2>&1;
     exit 1
 fi
 
+PY_PKGS=(weasyprint markdown pymdown-extensions pygments)
+
+install_python_packages() {
+    local py_exec="$1"
+    if [[ -n "${PIP_EXTRA_FLAGS:-}" ]]; then
+        # shellcheck disable=SC2086
+        "$py_exec" -m pip install --quiet "${PY_PKGS[@]}" ${PIP_EXTRA_FLAGS}
+    else
+        "$py_exec" -m pip install --quiet "${PY_PKGS[@]}"
+    fi
+}
+
+PYTHON_INSTALL_MODE="system"
+
 if $CHECK_ONLY; then
     for pkg in weasyprint markdown pymdownx pygments; do
         if python3 -c "import ${pkg/pymdownx/pymdownx.superfences}" &>/dev/null 2>&1 || \
@@ -52,11 +66,77 @@ if $CHECK_ONLY; then
     done
 else
     info "Installing Python packages..."
-    pip3 install --quiet weasyprint markdown pymdown-extensions pygments \
-        ${PIP_EXTRA_FLAGS:-} 2>&1 | tail -3 || \
-    pip3 install --quiet --break-system-packages \
-        weasyprint markdown pymdown-extensions pygments 2>&1 | tail -3
-    ok "Python packages installed"
+    if install_python_packages python3; then
+        ok "Python packages installed"
+    elif python3 -m pip install --quiet --break-system-packages "${PY_PKGS[@]}" 2>&1 | tail -3; then
+        ok "Python packages installed (with --break-system-packages)"
+    else
+        warn "Global pip install failed."
+
+        if [[ ! -t 0 ]]; then
+            err "Non-interactive shell: cannot prompt for virtual environment setup."
+            err "Re-run installer interactively or create a venv manually."
+            exit 1
+        fi
+
+        echo ""
+        echo "  Python package install fallback"
+        echo "  1) Create new virtual environment (.venv)"
+        echo "  2) Use existing virtual environment"
+        echo "  3) Abort"
+
+        while true; do
+            read -r -p "Choose [1/2/3]: " venv_choice
+            case "${venv_choice:-}" in
+                1)
+                    read -r -p "Venv path [.venv]: " venv_path
+                    venv_path="${venv_path:-.venv}"
+                    info "Creating virtual environment at: $venv_path"
+                    python3 -m venv "$venv_path"
+                    # shellcheck disable=SC1090
+                    source "$venv_path/bin/activate"
+                    if install_python_packages python; then
+                        ok "Python packages installed in virtual environment"
+                        PYTHON_INSTALL_MODE="venv:$venv_path"
+                        deactivate || true
+                        break
+                    else
+                        err "Install failed in created virtual environment."
+                        deactivate || true
+                    fi
+                    ;;
+                2)
+                    read -r -p "Path to existing virtual environment: " venv_path
+                    if [[ -z "${venv_path:-}" ]]; then
+                        warn "No path provided."
+                        continue
+                    fi
+                    if [[ ! -f "$venv_path/bin/activate" ]]; then
+                        err "Not a valid virtual environment: $venv_path"
+                        continue
+                    fi
+                    # shellcheck disable=SC1090
+                    source "$venv_path/bin/activate"
+                    if install_python_packages python; then
+                        ok "Python packages installed in existing virtual environment"
+                        PYTHON_INSTALL_MODE="venv:$venv_path"
+                        deactivate || true
+                        break
+                    else
+                        err "Install failed in existing virtual environment."
+                        deactivate || true
+                    fi
+                    ;;
+                3)
+                    err "Aborted by user."
+                    exit 1
+                    ;;
+                *)
+                    warn "Invalid choice. Enter 1, 2, or 3."
+                    ;;
+            esac
+        done
+    fi
 fi
 
 # ── 3. Node / npm ────────────────────────────────────────────────────────────
@@ -132,6 +212,13 @@ fi
 echo ""
 echo "  Installation complete."
 echo ""
+if [[ "$PYTHON_INSTALL_MODE" == venv:* ]]; then
+    VENV_PATH="${PYTHON_INSTALL_MODE#venv:}"
+    echo "  Python packages installed in virtual environment: $VENV_PATH"
+    echo "  Activate before running md2pdf:"
+    echo "    source $VENV_PATH/bin/activate"
+    echo ""
+fi
 echo "  Usage:"
 echo "    python3 $SCRIPT_DIR/md2pdf.py <docs-dir/>          # portrait, default margins"
 echo "    python3 $SCRIPT_DIR/md2pdf.py <docs-dir/> out.pdf  # explicit output"

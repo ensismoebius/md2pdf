@@ -17,6 +17,7 @@
 - **Working internal links** — cross-document `[text](other.md#heading)` links become clickable PDF bookmarks
 - **Page options** — portrait/landscape, custom margins
 - **Wiki-style links** — `[[Page]]` and `[[Page|Label]]` syntax supported
+- **Installer-managed Chromium setup** — `install.sh` / `install.ps1` download `chrome-headless-shell`
 
 ---
 
@@ -70,9 +71,10 @@ To verify only:
 ### What the installer does
 
 1. Checks Python 3.9+ and Node.js 18+ are on `PATH`
-2. Installs Python packages: `weasyprint`, `markdown`, `pymdown-extensions`, `pygments`
-3. Runs `npm install` (pulls `@mermaid-js/mermaid-cli` + Puppeteer)
-4. Downloads the Chromium headless shell binary (~113 MB) needed by Mermaid CLI
+2. Tries installing Python packages: `weasyprint`, `markdown`, `pymdown-extensions`, `pygments`
+3. If global Python install fails, asks whether to create a new virtual environment or use an existing one
+4. Runs `npm install` (pulls `@mermaid-js/mermaid-cli` + Puppeteer)
+5. Pre-downloads the Chromium headless shell binary (~113 MB) for Mermaid CLI
 
 ### Manual installation
 
@@ -84,24 +86,8 @@ pip install -r requirements.txt
 npm install
 ```
 
-Then download Chromium headless shell manually:
-
-**Linux/macOS:**
-```bash
-curl -L "https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.97/linux64/chrome-headless-shell-linux64.zip" \
-  -o /tmp/chs.zip
-mkdir -p ~/.cache/puppeteer/chrome-headless-shell/linux-148.0.7778.97
-cd ~/.cache/puppeteer/chrome-headless-shell/linux-148.0.7778.97
-unzip /tmp/chs.zip && chmod +x chrome-headless-shell-linux64/chrome-headless-shell
-```
-
-**Windows (PowerShell):**
-```powershell
-$dest = "$env:USERPROFILE\.cache\puppeteer\chrome-headless-shell\win64-148.0.7778.97"
-New-Item -ItemType Directory -Force -Path $dest
-Invoke-WebRequest "https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.97/win64/chrome-headless-shell-win64.zip" -OutFile "$dest\chs.zip"
-Expand-Archive "$dest\chs.zip" -DestinationPath $dest
-```
+Download Chromium headless shell via installer scripts (`install.sh` / `install.ps1`).
+If skipped, Mermaid rendering can fail at runtime.
 
 ---
 
@@ -269,7 +255,7 @@ md2pdf/
 
 **Windows: `pip install` fails with permission error** — use `pip install --user -r requirements.txt` or run inside a virtual environment (`python -m venv .venv && .venv\Scripts\activate`).
 
-**Windows: Chrome download fails** — download manually from the URL shown in the installer output and extract to `%USERPROFILE%\.cache\puppeteer\chrome-headless-shell\win64-148.0.7778.97\`.
+**Chrome headless shell download fails** — rerun installer with stable connection, check proxy/firewall access to `storage.googleapis.com`, or download manually from installer URL and extract to Puppeteer cache path shown by installer.
 
 ---
 
