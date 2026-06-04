@@ -1,6 +1,6 @@
 # md2pdf
 
-> Convert interlinked Markdown files to a beautiful, GitHub-styled PDF — with Mermaid diagrams, LaTeX math, working internal links, and syntax-highlighted code.
+> Convert interlinked Markdown files to a beautiful, GitHub-styled PDF or EPUB — with Mermaid diagrams, LaTeX math, working internal links, and syntax-highlighted code.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://python.org)
@@ -10,14 +10,17 @@
 
 ## Features
 
-- **Recursive link following** — starts from `home.md` or `index.md` and follows every relative `.md` link (BFS order), assembling all pages into one PDF
+- **Recursive link following** — starts from `home.md` or `index.md` and follows every relative `.md` link (BFS order), assembling all pages into one document
 - **Mermaid diagrams** — `flowchart`, `sequenceDiagram`, `classDiagram`, `gitGraph`, and more rendered as crisp PNGs
 - **LaTeX math** — `$inline$` and `$$display$$` math rendered server-side via [KaTeX](https://katex.org) (no browser needed)
 - **GitHub-style CSS** — Inter/system font stack, syntax-highlighted code blocks (Pygments), tables, task lists, blockquotes
-- **Working internal links** — cross-document `[text](other.md#heading)` links become clickable PDF bookmarks
-- **Page options** — portrait/landscape, custom margins
+- **Working internal links** — cross-document `[text](other.md#heading)` links become clickable bookmarks in both PDF and EPUB
+- **Page options** — portrait/landscape, custom margins (PDF)
 - **Wiki-style links** — `[[Page]]` and `[[Page|Label]]` syntax supported
 - **Installer-managed Chromium setup** — `install.sh` / `install.ps1` download `chrome-headless-shell`
+- **Dual output** — PDF (via WeasyPrint) or EPUB (via ebooklib)
+- **Document outline** — PDF bookmarks and hierarchical EPUB navigation (NCX + Nav) from headings
+- **EPUB image embedding** — Mermaid PNGs and local images are bundled inside the EPUB container
 
 ---
 
@@ -72,7 +75,7 @@ To verify only:
 
 1. Checks Python 3.9+ and Node.js 18+ are on `PATH`
 2. Tries installing Python packages: `weasyprint`, `markdown`, `pymdown-extensions`, `pygments`
-3. If global Python install fails, asks whether to create a new virtual environment or use an existing one
+3. If global install fails (e.g., externally-managed-environment / PEP 668), prompts to create a new virtual environment or use an existing one
 4. Runs `npm install` (pulls `@mermaid-js/mermaid-cli` + Puppeteer)
 5. Pre-downloads the Chromium headless shell binary (~113 MB) for Mermaid CLI
 
@@ -94,33 +97,40 @@ If skipped, Mermaid rendering can fail at runtime.
 ## Usage
 
 ```bash
-python3 md2pdf.py <input> [output.pdf] [options]
+python3 md2pdf.py <input> [output] [options]
 ```
 
 | Argument | Description |
 |----------|-------------|
 | `input` | Directory (auto-finds `home.md`/`index.md`) or a single `.md` file |
-| `output` | Output PDF path (default: `<input>/output.pdf`) |
+| `output` | Output file path (default: `<input>/output.pdf` or `.epub`) |
+| `-f <pdf\|epub>` | Output format — `pdf` *(default)* or `epub` |
 | `-o <p\|l>` | Orientation — `p` portrait *(default)*, `l` landscape |
 | `-m T L B R` | Margins in mm — top, left, bottom, right *(default: 20 20 25 20)* |
 
 ### Examples
 
 ```bash
-# Convert a docs directory (auto-detects home.md)
+# Convert a docs directory (auto-detects home.md) → PDF
 python3 md2pdf.py docs/
 
-# Explicit output path
+# Explicit output path (PDF)
 python3 md2pdf.py docs/ manual.pdf
 
-# Landscape with narrow margins
+# Landscape with narrow margins (PDF)
 python3 md2pdf.py docs/ manual.pdf -o l -m 12 10 15 10
 
-# Single file
+# Single file (PDF)
 python3 md2pdf.py README.md output.pdf
 
-# Portrait with wide margins
+# Portrait with wide margins (PDF)
 python3 md2pdf.py wiki/ wiki.pdf -m 25 30 25 30
+
+# EPUB output
+python3 md2pdf.py docs/ manual.epub --format epub
+
+# EPUB with explicit format flag
+python3 md2pdf.py docs/ --format epub
 ```
 
 ### Shortcut alias
@@ -143,24 +153,28 @@ function md2pdf { python 'C:\path\to\md2pdf\md2pdf.py' @args }
 input directory
       │
       ▼
- home.md / index.md          ← entry point
+ home.md / index.md            ← entry point
       │
       ▼
- BFS link traversal           ← follows [text](page.md) and [[Page]] links
+ BFS link traversal             ← follows [text](page.md) and [[Page]] links
       │
-      ├─ render_math_blocks()  ← KaTeX: $...$ and $$...$$ → HTML spans
+      ├─ render_math_blocks()    ← KaTeX: $...$ and $$...$$ → HTML spans
       ├─ render_mermaid_blocks() ← mmdc: ```mermaid → PNG images
-      ├─ rewrite_image_paths() ← relative imgs → absolute file:// URIs
-      ├─ md_to_html_fragment() ← python-markdown + pymdownx extensions
-      ├─ prefix_heading_ids()  ← prevents id collisions across documents
+      ├─ rewrite_image_paths()   ← relative imgs → absolute file:// URIs
+      ├─ md_to_html_fragment()   ← python-markdown + pymdownx extensions
+      ├─ prefix_heading_ids()    ← prevents id collisions across documents
       └─ rewrite_internal_links() ← .md hrefs → #anchor-id
 
       │
-      ▼
- build_html()                  ← single HTML document + GitHub CSS + KaTeX CSS
+      ├──── PDF path ─────────────────────────────────────────────────────
+      │      build_html()         ← single HTML doc + GitHub CSS + KaTeX CSS
+      │      weasyprint → PDF     ← A4, page numbers, configurable margins
       │
-      ▼
- weasyprint → PDF              ← A4/Letter, page numbers, configurable margins
+      └──── EPUB path ────────────────────────────────────────────────────
+             per-chapter XHTML    ← one file per .md document
+             _rewrite_epub_links() ← #anchor → chap_NNN.xhtml[#id]
+             _embed_epub_images() ← local PNGs bundled into EPUB container
+             ebooklib → EPUB      ← NCX + Nav TOC, CSS embedded
 ```
 
 ---
@@ -246,6 +260,10 @@ md2pdf/
 **`weasyprint` import error** — run `pip install -r requirements.txt`.
 
 **Mermaid diagrams show as code** — the diagram has a syntax error. Check the `[warn] mmdc error` message in the output. Labels with `()` or `||` are auto-fixed; other errors (e.g. unknown node type) need fixing in the source.
+
+**EPUB: Mermaid diagrams show alt text only** — ensure `mmdc` is installed (`bash install.sh`) so PNGs are generated before EPUB packaging.
+
+**EPUB: links do not navigate** — only relative `.md` links are rewritten; external URLs and bare fragment anchors without a file part are left as-is.
 
 **Math shows as raw `$...$`** — ensure `katex_render.js` is present next to `md2pdf.py` and `node` is on your PATH.
 

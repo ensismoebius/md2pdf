@@ -76,10 +76,19 @@ if ($Check) {
     }
 } else {
     Write-Info "Installing Python packages..."
-    if (Install-PythonPackages -PythonCmd $python) {
+    $pipOutput = & $python -m pip install --quiet @packages 2>&1
+    $pipSuccess = ($LASTEXITCODE -eq 0)
+    
+    if ($pipSuccess) {
         Write-OK "Python packages installed"
     } else {
-        Write-Warn "Global pip install failed."
+        # Check if failure is due to externally-managed-environment (PEP 668)
+        if ($pipOutput -match "externally-managed-environment") {
+            Write-Warn "System Python is externally managed (PEP 668)."
+        } else {
+            Write-Warn "Global pip install failed."
+        }
+
         Write-Host ""
         Write-Host "  Python package install fallback"
         Write-Host "  1) Create new virtual environment (.venv)"

@@ -66,12 +66,17 @@ if $CHECK_ONLY; then
     done
 else
     info "Installing Python packages..."
+    # Try global install first
     if install_python_packages python3; then
         ok "Python packages installed"
-    elif python3 -m pip install --quiet --break-system-packages "${PY_PKGS[@]}" 2>&1 | tail -3; then
-        ok "Python packages installed (with --break-system-packages)"
     else
-        warn "Global pip install failed."
+        # Check if failure is due to externally-managed-environment
+        pip_output=$(python3 -m pip install "${PY_PKGS[@]}" 2>&1 || true)
+        if echo "$pip_output" | grep -q "externally-managed-environment"; then
+            warn "System Python is externally managed (PEP 668)."
+        else
+            warn "Global pip install failed."
+        fi
 
         if [[ ! -t 0 ]]; then
             err "Non-interactive shell: cannot prompt for virtual environment setup."

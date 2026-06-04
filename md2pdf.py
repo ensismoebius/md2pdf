@@ -695,9 +695,10 @@ def build_html(sections: list[tuple[str, str, str]]) -> str:
     return "\n".join(parts)
 
 
-def convert(input_path: Path, output_pdf: Path,
+def convert(input_path: Path, output_path: Path,
             orientation: str = 'portrait',
-            margins: tuple[str, str, str, str] = ('20mm', '20mm', '25mm', '20mm')) -> None:
+            margins: tuple[str, str, str, str] = ('20mm', '20mm', '25mm', '20mm'),
+            output_format: str = 'pdf') -> None:
     """Main conversion pipeline."""
     # Resolve start file
     if input_path.is_dir():
@@ -767,41 +768,250 @@ def convert(input_path: Path, output_pdf: Path,
         html_path = tmp_dir / "document.html"
         html_path.write_text(full_html, encoding="utf-8")
 
-        print(f"  [info] rendering PDF with weasyprint...")
-        try:
-            from weasyprint import HTML, CSS
-            from weasyprint.text.fonts import FontConfiguration
-            font_config = FontConfiguration()
+        # Extract bookmarks from sections for PDF outline
+        bookmarks = extract_bookmarks(sections)
 
-            # Page margins and print settings
-            size_decl = f"A4 {orientation}"
-            top, left, bottom, right = margins
-            print_css = CSS(string=f"""
-                @page {{
-                    size: {size_decl};
-                    margin: {top} {right} {bottom} {left};
-                    @bottom-center {{
-                        content: counter(page) " / " counter(pages);
-                        font-size: 10px;
-                        color: #57606a;
+        if output_format == 'pdf':
+            print(f"  [info] rendering PDF with weasyprint...")
+            try:
+                from weasyprint import HTML, CSS
+                from weasyprint.text.fonts import FontConfiguration
+                font_config = FontConfiguration()
+
+                # Page margins and print settings
+                size_decl = f"A4 {orientation}"
+                top, left, bottom, right = margins
+                print_css = CSS(string=f"""
+                    @page {{
+                        size: {size_decl};
+                        margin: {top} {right} {bottom} {left};
+                        @bottom-center {{
+                            content: counter(page) " / " counter(pages);
+                            font-size: 10px;
+                            color: #57606a;
+                        }}
                     }}
-                }}
-                body {{ max-width: none; padding: 0; }}
-            """, font_config=font_config)
+                    body {{ max-width: none; padding: 0; }}
+                """, font_config=font_config)
 
-            HTML(filename=str(html_path)).write_pdf(
-                target=str(output_pdf),
-                stylesheets=[print_css],
-                font_config=font_config,
-                presentational_hints=True,
+                HTML(filename=str(html_path)).write_pdf(
+                    target=str(output_path),
+                    stylesheets=[print_css],
+                    font_config=font_config,
+                    presentational_hints=True,
+                    bookmarks=bookmarks,
+                )
+            except Exception as e:
+                print(f"Error during PDF generation: {e}", file=sys.stderr)
+                sys.exit(1)
+
+            print(f"\n  [done] PDF written to: {output_path}")
+            size_mb = output_path.stat().st_size / (1024 * 1024)
+            print(f"         Size: {size_mb:.2f} MB")
+
+        elif output_format == 'epub':
+            print(f"  [info] rendering EPUB with ebooklib...")
+            try:
+                write_epub(sections, output_path, title=input_path.name)
+            except Exception as e:
+                print(f"Error during EPUB generation: {e}", file=sys.stderr)
+                sys.exit(1)
+
+
+def extract_bookmarks(sections: list[tuple[str, str, str]]) -> list[tuple[int, str]]:
+    """
+    Extract bookmarks from HTML fragments for PDF outline.
+    Returns list of (level, title) tuples where level is heading depth (1-6).
+    """
+    import re
+    bookmarks = []
+    for doc_title, anchor_id, fragment in sections:
+        # Add document title as level 1 bookmark
+        bookmarks.append((1, doc_title))
+        # Extract headings from fragment
+        for m in re.finditer(r'<h([1-6])[^>]*id="([^"]+)"[^>]*>(.*?)</h\1>', fragment, re.DOTALL):
+            level = int(m.group(1))
+            heading_id = m.group(2)
+            raw = re.sub(r'<a\b[^>]*class="[^"]*headerlink[^"]*"[^>]*>.*?</a>', '', m.group(3), flags=re.DOTALL)
+            heading_text = re.sub(r'<[^>]+>', '', raw).strip()
+            if heading_text:
+                bookmarks.append((level + 1, heading_text))
+    return bookmarks
+
+
+def _embed_epub_images(fragment: str, book, path_to_epub: dict[str, str]) -> str:
+    """
+    Embed local images (absolute paths / file:// URIs) into the EPUB book and
+    rewrite <img src="..."> to the relative EPUB path.
+    path_to_epub is a shared cache {fs_path_str: epub_relative_name}.
+    """
+    import mimetypes
+    from ebooklib import epub
+
+    def replace_src(m: re.Match) -> str:
+        full_tag = m.group(0)
+        src = m.group(1)
+
+        if src.startswith('file://'):
+            fs_path = Path(urllib.parse.unquote(src[7:]))
+        elif src.startswith('/'):
+            fs_path = Path(src)
+        else:
+            return full_tag  # relative or http — leave alone
+
+        key = str(fs_path)
+        if key not in path_to_epub:
+            if not fs_path.exists():
+                return full_tag
+            ext = fs_path.suffix.lower() or '.png'
+            idx = len(path_to_epub)
+            epub_name = f"images/img_{idx:04d}{ext}"
+            media_type = mimetypes.guess_type(str(fs_path))[0] or 'image/png'
+            img_item = epub.EpubImage(
+                uid=f"epub_img_{idx}",
+                file_name=epub_name,
+                media_type=media_type,
+                content=fs_path.read_bytes(),
             )
-        except Exception as e:
-            print(f"Error during PDF generation: {e}", file=sys.stderr)
-            sys.exit(1)
+            book.add_item(img_item)
+            path_to_epub[key] = epub_name
 
-        print(f"\n  [done] PDF written to: {output_pdf}")
-        size_mb = output_pdf.stat().st_size / (1024 * 1024)
-        print(f"         Size: {size_mb:.2f} MB")
+        return full_tag.replace(src, path_to_epub[key], 1)
+
+    return re.sub(r'<img\b[^>]*\bsrc="([^"]+)"', replace_src, fragment, flags=re.IGNORECASE)
+
+
+def _rewrite_epub_links(fragment: str, anchor_to_file: dict[str, str]) -> str:
+    """Convert PDF-style #anchor links to EPUB cross-chapter chap_NNN.xhtml[#id] links."""
+    def replace_href(m: re.Match) -> str:
+        before = m.group(1)
+        quote  = m.group(2)
+        href   = m.group(3)
+        after  = m.group(4)
+
+        if not href.startswith('#'):
+            return m.group(0)
+        target = href[1:]
+
+        # Direct section anchor → chapter root
+        if target in anchor_to_file:
+            return f'<a {before}href={quote}{anchor_to_file[target]}{quote}{after}>'
+
+        # Prefixed heading: anchor_id--slug → chap_NNN.xhtml#anchor_id--slug
+        for anchor_id, chap_file in anchor_to_file.items():
+            if target.startswith(anchor_id + '--'):
+                return f'<a {before}href={quote}{chap_file}#{target}{quote}{after}>'
+
+        return m.group(0)
+
+    return re.compile(
+        r'<a\s+([^>]*?)href=(["\'])([^"\'> ]+)\2([^>]*)>', re.IGNORECASE
+    ).sub(replace_href, fragment)
+
+
+def write_epub(sections: list[tuple[str, str, str]], output_epub: Path,
+               title: str = "md2pdf Document") -> None:
+    """Write collected sections as an EPUB file with proper navigation."""
+    from ebooklib import epub
+
+    book = epub.EpubBook()
+    book.set_identifier("md2pdf-output")
+    book.set_title(title)
+    book.set_language("en")
+    book.add_author("md2pdf")
+
+    # CSS for EPUB
+    epub_css = f"""
+{GITHUB_CSS}
+{KATEX_CSS if KATEX_CSS else ""}
+.math-display {{ display: block; text-align: center; margin: 1em 0; overflow-x: auto; }}
+.katex-display {{ overflow-x: auto; overflow-y: hidden; }}
+.math-fallback {{ background: #fff3cd; padding: 2px 4px; border-radius: 3px; font-style: italic; }}
+.doc-section {{ margin-bottom: 2em; }}
+.section-sep {{ margin: 2em 0; border-top: 1px solid #d0d7de; }}
+"""
+
+    nav_css = epub.EpubItem(
+        uid="style_nav",
+        file_name="style/nav.css",
+        media_type="text/css",
+        content=epub_css
+    )
+    book.add_item(nav_css)
+
+    # Map anchor_id → chapter filename for link rewriting
+    anchor_to_file = {
+        anchor_id: f"chap_{i:03d}.xhtml"
+        for i, (_, anchor_id, _) in enumerate(sections)
+    }
+
+    # Shared cache: filesystem path → EPUB relative image name
+    path_to_epub: dict[str, str] = {}
+
+    # Build chapters with hierarchical TOC
+    epub_chapters = []
+    toc_items = []
+    for i, (doc_title, anchor_id, fragment) in enumerate(sections):
+        epub_fragment = _rewrite_epub_links(fragment, anchor_to_file)
+        epub_fragment = _embed_epub_images(epub_fragment, book, path_to_epub)
+        chapter_html = f"""<?xml version='1.0' encoding='utf-8'?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>{doc_title}</title>
+    <link rel="stylesheet" type="text/css" href="style/nav.css" />
+</head>
+<body>
+    <div id="{anchor_id}" class="doc-section">
+        {epub_fragment}
+    </div>
+</body>
+</html>"""
+
+        chapter = epub.EpubHtml(
+            title=doc_title,
+            file_name=f"chap_{i:03d}.xhtml",
+            lang="en",
+        )
+        chapter.content = chapter_html.encode("utf-8")
+        chapter.add_item(nav_css)
+        book.add_item(chapter)
+        epub_chapters.append(chapter)
+
+        # Build hierarchical TOC with headings
+        import re
+        chapter_toc = []
+        for m in re.finditer(r'<h([1-6])[^>]*id="([^"]+)"[^>]*>(.*?)</h\1>', fragment, re.DOTALL):
+            level = int(m.group(1))
+            heading_id = m.group(2)
+            raw = re.sub(r'<a\b[^>]*class="[^"]*headerlink[^"]*"[^>]*>.*?</a>', '', m.group(3), flags=re.DOTALL)
+            heading_text = re.sub(r'<[^>]+>', '', raw).strip()
+            if heading_text:
+                # Create link to heading within chapter
+                chapter_toc.append(epub.Link(
+                    f"chap_{i:03d}.xhtml#{heading_id}",
+                    heading_text,
+                    heading_id
+                ))
+        if chapter_toc:
+            toc_items.append((epub.Section(doc_title), chapter_toc))
+        else:
+            toc_items.append(chapter)
+
+    # Table of contents with hierarchy
+    book.toc = toc_items
+
+    # Navigation files
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+
+    # Spine
+    book.spine = ['nav'] + epub_chapters
+
+    # Write
+    epub.write_epub(str(output_epub), book, {"epub3_pages": False})
+    print(f"\n  [done] EPUB written to: {output_epub}")
+    size_mb = output_epub.stat().st_size / (1024 * 1024)
+    print(f"         Size: {size_mb:.2f} MB")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -816,17 +1026,25 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         prog='md2pdf',
-        description='Convert linked Markdown files to a GitHub-styled PDF.',
+        description='Convert linked Markdown files to a GitHub-styled PDF or EPUB.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             'examples:\n'
             '  md2pdf.py docs/            # auto-finds home.md / index.md\n'
             '  md2pdf.py docs/ out.pdf\n'
+            '  md2pdf.py docs/ out.epub --format epub\n'
             '  md2pdf.py README.md out.pdf -o l -m 15 10 20 10\n'
         ),
     )
     parser.add_argument('input',  help='Directory or .md file to convert')
-    parser.add_argument('output', nargs='?', help='Output PDF path (default: <input>/output.pdf)')
+    parser.add_argument('output', nargs='?', help='Output file path (default: <input>/output.pdf or .epub)')
+    parser.add_argument(
+        '-f', '--format',
+        choices=['pdf', 'epub'],
+        default='pdf',
+        metavar='<pdf|epub>',
+        help='Output format: pdf (default) or epub',
+    )
     parser.add_argument(
         '-o', '--orientation',
         choices=['p', 'l', 'portrait', 'landscape'],
@@ -848,23 +1066,32 @@ def main() -> None:
     if not input_path.exists():
         parser.error(f"'{input_path}' does not exist")
 
+    # Determine output path and format
     if args.output:
-        output_pdf = Path(args.output).resolve()
+        output_path = Path(args.output).resolve()
     else:
         base = input_path if input_path.is_dir() else input_path.parent
-        output_pdf = base / 'output.pdf'
+        ext = '.epub' if args.format == 'epub' else '.pdf'
+        output_path = base / f'output{ext}'
+
+    # Validate extension matches format
+    expected_ext = '.epub' if args.format == 'epub' else '.pdf'
+    if output_path.suffix.lower() != expected_ext:
+        print(f"  [warn] output extension {output_path.suffix} doesn't match format {args.format}; using {expected_ext}", file=sys.stderr)
+        output_path = output_path.with_suffix(expected_ext)
 
     orientation = 'landscape' if args.orientation in ('l', 'landscape') else 'portrait'
     margins = tuple(_parse_margin(v) for v in args.margins)  # (top, left, bottom, right)
 
-    print('md2pdf — Markdown → GitHub-style PDF')
+    print('md2pdf — Markdown → GitHub-style PDF/EPUB')
     print(f'  input      : {input_path}')
-    print(f'  output     : {output_pdf}')
+    print(f'  output     : {output_path}')
+    print(f'  format     : {args.format}')
     print(f'  orientation: {orientation}')
     print(f'  margins    : top={margins[0]} left={margins[1]} bottom={margins[2]} right={margins[3]}')
     print()
 
-    convert(input_path, output_pdf, orientation=orientation, margins=margins)
+    convert(input_path, output_path, orientation=orientation, margins=margins, output_format=args.format)
 
 
 if __name__ == '__main__':
